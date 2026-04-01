@@ -92,6 +92,7 @@
     if (DEV_MODE) {
       return devFetchFile(filename, shaMap).then(css => {
         const style = document.createElement("style");
+        style.dataset.cr = "1";
         style.textContent = css;
         document.head.appendChild(style);
       });
@@ -99,6 +100,7 @@
       return new Promise((resolve, reject) => {
         const link = document.createElement("link");
         link.rel  = "stylesheet";
+        link.dataset.cr = "1";
         link.href = `${BASE_JSDELIVR}${filename}`;
         link.onload  = resolve;
         link.onerror = () => reject(new Error(`Failed: ${filename}`));
