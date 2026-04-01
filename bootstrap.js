@@ -15,6 +15,7 @@
   };
 
   const c = window.__CR;
+  const DEBUG = !!localStorage.getItem('__CR_DEBUG');
   const API_BASE = `https://api.github.com/repos/${c.GH_USER}/${c.GH_REPO}`;
 
   if (c.DEV_MODE) {

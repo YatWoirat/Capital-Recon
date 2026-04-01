@@ -14,6 +14,8 @@
   const BASE_JSDELIVR = `https://cdn.jsdelivr.net/gh/${GH_USER}/${GH_REPO}@${GH_BRANCH}/src/`;
   const API_BASE      = `https://api.github.com/repos/${GH_USER}/${GH_REPO}`;
 
+  const DEBUG = !!localStorage.getItem('__CR_DEBUG');
+
   let jsFiles  = [];
   let cssFiles = [];
 
