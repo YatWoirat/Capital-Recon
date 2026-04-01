@@ -1,224 +1,166 @@
-/* ── capital-recon.com Main Loader ─────────────────────────────── *
+/* -- capital-recon.com Main Loader ------------------------------- *
  * Loaded by bootstrap.js. Reads config from window.__CR.          *
  *                                                                  *
- * PROD:  jsDelivr CDN  – cached, correct MIME types               *
- * DEV:   raw.github     – instant after commit, fetch+blob trick  *
- *        + SHA verification against repo (including self-check)   *
- * ─────────────────────────────────────────────────────────────── */
+ * PROD:  jsDelivr CDN  -- cached, correct MIME types               *
+ * DEV:   Git Blobs API -- fetches by SHA, zero cache issues        *
+ * --------------------------------------------------------------- */
 (function () {
-  var cr = window.__CR || {};
-  var DEV_MODE  = cr.DEV_MODE !== false;
-  var GH_USER   = cr.GH_USER   || "YatWoirat";
-  var GH_REPO   = cr.GH_REPO   || "Capital-Recon";
-  var GH_BRANCH = cr.GH_BRANCH || "master";
+  const cr        = window.__CR || {};
+  const DEV_MODE  = cr.DEV_MODE !== false;
+  const GH_USER   = cr.GH_USER   || "YatWoirat";
+  const GH_REPO   = cr.GH_REPO   || "Capital-Recon";
+  const GH_BRANCH = cr.GH_BRANCH || "master";
 
-  var BASE_JSDELIVR =
-    "https://cdn.jsdelivr.net/gh/" + GH_USER + "/" + GH_REPO + "@" + GH_BRANCH + "/src/";
-  var BASE_RAW =
-    "https://raw.githubusercontent.com/" + GH_USER + "/" + GH_REPO + "/" + GH_BRANCH + "/src/";
-  var BASE = DEV_MODE ? BASE_RAW : BASE_JSDELIVR;
+  const BASE_JSDELIVR = `https://cdn.jsdelivr.net/gh/${GH_USER}/${GH_REPO}@${GH_BRANCH}/src/`;
+  const API_BASE      = `https://api.github.com/repos/${GH_USER}/${GH_REPO}`;
 
-  /* ── Default files (loaded on every page) ───────────────────── */
-  var jsFiles = [];
-  var cssFiles = [];
+  let jsFiles  = [];
+  let cssFiles = [];
 
-  /* ── Merge per-page extras from bootstrap ───────────────────── */
   if (cr.extraJs)  jsFiles  = jsFiles.concat(cr.extraJs);
   if (cr.extraCss) cssFiles = cssFiles.concat(cr.extraCss);
 
-  /* ── Git blob SHA-1 (same algorithm Git uses) ────────────────── */
-  function gitBlobSHA1(content) {
-    var raw = new TextEncoder().encode(content);
-    var header = new TextEncoder().encode("blob " + raw.byteLength + "\0");
-    var combined = new Uint8Array(header.byteLength + raw.byteLength);
-    combined.set(header, 0);
-    combined.set(raw, header.byteLength);
-    return crypto.subtle.digest("SHA-1", combined).then(function (buf) {
-      return Array.from(new Uint8Array(buf))
-        .map(function (b) { return b.toString(16).padStart(2, "0"); })
-        .join("");
-    });
-  }
-
-  /* ── Fetch expected SHAs from GitHub Trees API ───────────────── */
-  function fetchExpectedSHAs() {
-    var url =
-      "https://api.github.com/repos/" + GH_USER + "/" + GH_REPO + "/git/trees/" + GH_BRANCH + "?recursive=1";
-    return fetch(url)
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        var map = {};
-        (data.tree || []).forEach(function (item) {
-          map[item.path] = item.sha;
-        });
+  /* -- Fetch SHA map from GitHub Trees API ----------------------- *
+   * Maps "src/filename" → SHA so we can call the Blobs API.       *
+   * The blob fetch by SHA is the integrity guarantee itself.       *
+   * ------------------------------------------------------------- */
+  function fetchSHAMap() {
+    return fetch(`${API_BASE}/git/trees/${GH_BRANCH}?recursive=1`)
+      .then(res => res.json())
+      .then(data => {
+        const map = {};
+        (data.tree || []).forEach(item => { map[item.path] = item.sha; });
         return map;
       })
-      .catch(function (err) {
-        console.warn("[Loader] Could not fetch tree SHAs: " + err.message);
+      .catch(err => {
+        console.warn(`[Loader] Could not fetch tree SHAs: ${err.message}`);
         return {};
       });
   }
 
-  /* ── Verify loaded content matches repo ──────────────────────── */
-  function verifySHA(filename, content, expectedSHAs) {
-    var repoPath = "src/" + filename;
-    return gitBlobSHA1(content).then(function (loadedSHA) {
-      var expected = expectedSHAs[repoPath];
-      if (!expected) {
-        console.warn(
-          "[Loader] \u26a0 " + filename + " \u2014 not found in repo tree at \"" + repoPath + "\""
-        );
-      } else if (loadedSHA === expected) {
-        console.log(
-          "%c[Loader] \u2714 " + filename + " \u2014 SHA match (" + loadedSHA.substring(0, 7) + ")",
-          "color: #0c0; font-weight: bold"
-        );
-      } else {
-        console.warn(
-          "[Loader] \u2718 " + filename + " \u2014 MISMATCH!\n" +
-          "  Loaded:   " + loadedSHA.substring(0, 7) + "\n" +
-          "  Expected: " + expected.substring(0, 7)
-        );
-      }
-    });
+  /* -- Fetch file content by SHA via Git Blobs API --------------- */
+  function fetchBlobBySHA(sha) {
+    return fetch(`${API_BASE}/git/blobs/${sha}`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Blob fetch HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => atob(data.content.replace(/\n/g, "")));
   }
 
-  /* ── Dev: self-check (verify the actually running loader.js) ── */
-  function selfCheck(expectedSHAs) {
-    if (!cr._loaderSource) {
-      console.warn("[Loader] Self-check skipped \u2014 no source from bootstrap");
-      return Promise.resolve();
-    }
-    return verifySHA("loader.js", cr._loaderSource, expectedSHAs)
-      .catch(function (err) {
-        console.warn("[Loader] Self-check failed: " + err.message);
-      });
-  }
-
-  /* ── Dev: log latest commit info ─────────────────────────────── */
+  /* -- Dev: log latest commit info ------------------------------- */
   function logLatestCommit() {
-    var apiURL =
-      "https://api.github.com/repos/" + GH_USER + "/" + GH_REPO + "/commits?sha=" + GH_BRANCH + "&per_page=1";
-    return fetch(apiURL)
-      .then(function (res) { return res.json(); })
-      .then(function (commits) {
+    return fetch(`${API_BASE}/commits?sha=${GH_BRANCH}&per_page=1`)
+      .then(res => res.json())
+      .then(commits => {
         if (!commits.length) return;
-        var c = commits[0];
-        var sha = c.sha.substring(0, 7);
-        var date = new Date(c.commit.committer.date);
-        var msg = c.commit.message.split("\n")[0];
-        var ago = Math.round((Date.now() - date.getTime()) / 1000);
-        var agoStr =
-          ago < 60    ? ago + "s ago" :
-          ago < 3600  ? Math.round(ago / 60) + "m ago" :
-          ago < 86400 ? Math.round(ago / 3600) + "h ago" :
-                        Math.round(ago / 86400) + "d ago";
+        const c    = commits[0];
+        const sha  = c.sha.substring(0, 7);
+        const date = new Date(c.commit.committer.date);
+        const msg  = c.commit.message.split("\n")[0];
+        const ago  = Math.round((Date.now() - date.getTime()) / 1000);
+        const agoStr =
+          ago < 60    ? `${ago}s ago` :
+          ago < 3600  ? `${Math.round(ago / 60)}m ago` :
+          ago < 86400 ? `${Math.round(ago / 3600)}h ago` :
+                        `${Math.round(ago / 86400)}d ago`;
         console.log(
-          "%c[Loader] Latest commit: " + sha + " \u2014 \"" + msg + "\" (" + agoStr + ")",
+          `%c[Loader] Latest commit: ${sha} — "${msg}" (${agoStr})`,
           "color: #0af; font-weight: bold"
         );
-        window.__CR_COMMIT = { sha: sha, message: msg, date: date, ago: agoStr };
+        window.__CR_COMMIT = { sha, message: msg, date, ago: agoStr };
       })
-      .catch(function (err) {
-        console.warn("[Loader] Could not fetch commit info: " + err.message);
+      .catch(err => {
+        console.warn(`[Loader] Could not fetch commit info: ${err.message}`);
       });
   }
 
-  /* ── CSS loader ──────────────────────────────────────────────── */
-  function loadCSS(url, filename, expectedSHAs) {
+  /* -- Dev: look up SHA from map, fetch blob --------------------- */
+  function devFetchFile(filename, shaMap) {
+    const repoPath = `src/${filename}`;
+    const sha = shaMap[repoPath];
+    if (!sha) {
+      return Promise.reject(new Error(`${filename} not found in repo tree at "${repoPath}"`));
+    }
+    return fetchBlobBySHA(sha);
+  }
+
+  /* -- CSS loader ------------------------------------------------ */
+  function loadCSS(filename, shaMap) {
     if (DEV_MODE) {
-      return fetch(url + "?t=" + Date.now())
-        .then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status + " \u2014 " + url);
-          return res.text();
-        })
-        .then(function (css) {
-          var style = document.createElement("style");
-          style.textContent = css;
-          document.head.appendChild(style);
-          return verifySHA(filename, css, expectedSHAs);
-        });
+      return devFetchFile(filename, shaMap).then(css => {
+        const style = document.createElement("style");
+        style.textContent = css;
+        document.head.appendChild(style);
+      });
     } else {
-      return new Promise(function (resolve, reject) {
-        var link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = url;
-        link.onload = resolve;
-        link.onerror = function () { reject(new Error("Failed: " + url)); };
+      return new Promise((resolve, reject) => {
+        const link = document.createElement("link");
+        link.rel  = "stylesheet";
+        link.href = `${BASE_JSDELIVR}${filename}`;
+        link.onload  = resolve;
+        link.onerror = () => reject(new Error(`Failed: ${filename}`));
         document.head.appendChild(link);
       });
     }
   }
 
-  /* ── JS loader ───────────────────────────────────────────────── */
-  function loadScript(url, filename, expectedSHAs) {
+  /* -- JS loader ------------------------------------------------- */
+  function loadScript(filename, shaMap) {
     if (DEV_MODE) {
-      return fetch(url + "?t=" + Date.now())
-        .then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status + " \u2014 " + url);
-          return res.text();
+      return devFetchFile(filename, shaMap).then(code =>
+        new Promise((resolve, reject) => {
+          const blob = new Blob([code], { type: "application/javascript" });
+          const s    = document.createElement("script");
+          s.src     = URL.createObjectURL(blob);
+          s.onload  = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
         })
-        .then(function (code) {
-          return verifySHA(filename, code, expectedSHAs).then(function () {
-            return new Promise(function (resolve, reject) {
-              var blob = new Blob([code], { type: "application/javascript" });
-              var s = document.createElement("script");
-              s.src = URL.createObjectURL(blob);
-              s.onload = resolve;
-              s.onerror = reject;
-              document.head.appendChild(s);
-            });
-          });
-        });
+      );
     } else {
-      return new Promise(function (resolve, reject) {
-        var s = document.createElement("script");
-        s.src = url;
-        s.onload = resolve;
-        s.onerror = function () { reject(new Error("Failed: " + url)); };
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src     = `${BASE_JSDELIVR}${filename}`;
+        s.onload  = resolve;
+        s.onerror = () => reject(new Error(`Failed: ${filename}`));
         document.head.appendChild(s);
       });
     }
   }
 
-  /* ── Execution ───────────────────────────────────────────────── *
-   * DEV:  commit info + tree SHAs → self-check → CSS → JS        *
-   *       each file is verified against the repo after fetching   *
-   * PROD: CSS → JS (no extra API calls)                           *
-   * ───────────────────────────────────────────────────────────── */
-  var shaMapReady = DEV_MODE
-    ? Promise.all([logLatestCommit(), fetchExpectedSHAs()])
-        .then(function (results) { return results[1]; })
+  /* -- Execution ------------------------------------------------- *
+   * DEV:  commit info + SHA map -> load CSS -> load JS            *
+   * PROD: CSS -> JS via jsDelivr (no extra API calls)             *
+   * ------------------------------------------------------------- */
+  const shaMapReady = DEV_MODE
+    ? Promise.all([logLatestCommit(), fetchSHAMap()])
+        .then(results => results[1])
     : Promise.resolve({});
 
   shaMapReady
-    .then(function (expectedSHAs) {
-      /* Self-check: verify loader.js itself is up to date */
-      var selfCheckReady = DEV_MODE
-        ? selfCheck(expectedSHAs)
-        : Promise.resolve();
-
-      return selfCheckReady.then(function () {
-        return cssFiles
-          .reduce(function (p, f) {
-            return p.then(function () {
-              return loadCSS(BASE + f, f, expectedSHAs).catch(function (err) {
-                console.error("[Loader] CSS failed \u2014 " + f + " \u2014 " + err.message);
-              });
-            });
-          }, Promise.resolve())
-          .then(function () {
-            return jsFiles.reduce(function (p, f) {
-              return p.then(function () {
-                return loadScript(BASE + f, f, expectedSHAs).catch(function (err) {
-                  console.error("[Loader] JS failed \u2014 " + f + " \u2014 " + err.message);
-                });
-              });
-            }, Promise.resolve());
-          });
-      });
-    })
-    .catch(function (err) {
-      console.error("[Loader] Aborted \u2014 " + err.message);
+    .then(shaMap =>
+      cssFiles
+        .reduce(
+          (p, f) => p.then(() =>
+            loadCSS(f, shaMap).catch(err => {
+              console.error(`[Loader] CSS failed — ${f} — ${err.message}`);
+            })
+          ),
+          Promise.resolve()
+        )
+        .then(() =>
+          jsFiles.reduce(
+            (p, f) => p.then(() =>
+              loadScript(f, shaMap).catch(err => {
+                console.error(`[Loader] JS failed — ${f} — ${err.message}`);
+              })
+            ),
+            Promise.resolve()
+          )
+        )
+    )
+    .catch(err => {
+      console.error(`[Loader] Aborted — ${err.message}`);
     });
 })();
