@@ -83,17 +83,13 @@
     });
   }
 
-  /* ── Dev: self-check (verify loader.js itself) ───────────────── */
+  /* ── Dev: self-check (verify the actually running loader.js) ── */
   function selfCheck(expectedSHAs) {
-    var url = BASE_RAW + "loader.js?t=" + Date.now();
-    return fetch(url)
-      .then(function (res) {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.text();
-      })
-      .then(function (code) {
-        return verifySHA("loader.js", code, expectedSHAs);
-      })
+    if (!cr._loaderSource) {
+      console.warn("[Loader] Self-check skipped \u2014 no source from bootstrap");
+      return Promise.resolve();
+    }
+    return verifySHA("loader.js", cr._loaderSource, expectedSHAs)
       .catch(function (err) {
         console.warn("[Loader] Self-check failed: " + err.message);
       });

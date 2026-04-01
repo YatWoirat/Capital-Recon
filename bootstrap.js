@@ -20,6 +20,7 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.text();
     }).then(function (code) {
+      c._loaderSource = code;
       var s = document.createElement("script");
       s.src = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
       document.head.appendChild(s);
