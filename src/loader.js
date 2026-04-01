@@ -19,12 +19,8 @@
   var BASE = DEV_MODE ? BASE_RAW : BASE_JSDELIVR;
 
   /* ── Default files (loaded on every page) ───────────────────── */
-  var jsFiles = [
-    "flat-parser.js",
-  ];
-  var cssFiles = [
-    "css/styles.css",
-  ];
+  var jsFiles = [];
+  var cssFiles = [];
 
   /* ── Merge per-page extras from bootstrap ───────────────────── */
   if (cr.extraJs)  jsFiles  = jsFiles.concat(cr.extraJs);
