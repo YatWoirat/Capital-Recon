@@ -9,7 +9,7 @@
   var DEV_MODE = false;
   var GH_USER   = "YatWoirat";
   var GH_REPO   = "Capital-Recon";
-  var GH_BRANCH = "main";
+  var GH_BRANCH = "master";
   var BASE_JSDELIVR =
     `https://cdn.jsdelivr.net/gh/${GH_USER}/${GH_REPO}@${GH_BRANCH}/src/`;
   var BASE_RAW =
